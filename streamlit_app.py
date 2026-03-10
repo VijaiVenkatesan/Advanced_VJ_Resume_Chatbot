@@ -16,6 +16,22 @@ from sklearn.metrics.pairwise import cosine_similarity
 # sentence-transformers for embeddings
 from sentence_transformers import SentenceTransformer
 
+# ============== API KEY CONFIGURATION ==============
+
+def get_api_key(provider: str) -> str:
+    """Get API key from secrets or session state"""
+    
+    # Try to get from Streamlit secrets first
+    if "Groq" in provider:
+        if "GROQ_API_KEY" in st.secrets:
+            return st.secrets["GROQ_API_KEY"]
+    else:
+        if "HUGGINGFACE_API_KEY" in st.secrets:
+            return st.secrets["HUGGINGFACE_API_KEY"]
+    
+    # Fall back to session state (user input)
+    return st.session_state.get("api_key", "")
+
 # =====================================================
 # PAGE CONFIG - MUST BE FIRST STREAMLIT COMMAND
 # =====================================================
@@ -616,48 +632,38 @@ with st.sidebar:
         help="Groq is faster. Both are FREE!"
     )
     
-    # Check for secrets
-    has_groq_secret = False
-    has_hf_secret = False
-    
-    try:
-        has_groq_secret = "GROQ_API_KEY" in st.secrets
-        has_hf_secret = "HUGGINGFACE_API_KEY" in st.secrets
-    except:
-        pass
-    
+    # Check if API key is in secrets
     if "Groq" in provider:
-        if has_groq_secret:
-            api_key = st.secrets["GROQ_API_KEY"]
-            st.success("✅ API Key loaded from secrets")
-        else:
+        secret_key = st.secrets.get("GROQ_API_KEY", "")
+    else:
+        secret_key = st.secrets.get("HUGGINGFACE_API_KEY", "")
+    
+    if secret_key:
+        # API key is pre-configured in secrets
+        api_key = secret_key
+        st.success("✅ API Key pre-configured")
+    else:
+        # Let user input API key
+        if "Groq" in provider:
             api_key = st.text_input(
                 "Groq API Key",
                 type="password",
-                value=st.session_state.api_key,
-                placeholder="gsk_...",
-                help="Get free key at console.groq.com"
+                value=st.session_state.get("api_key", ""),
+                help="Get your free API key from console.groq.com"
             )
-            st.markdown("[🔗 Get Free Groq Key](https://console.groq.com/keys)")
-            if api_key:
-                st.session_state.api_key = api_key
-                st.success("✅ Key entered")
-    else:
-        if has_hf_secret:
-            api_key = st.secrets["HUGGINGFACE_API_KEY"]
-            st.success("✅ API Key loaded from secrets")
+            st.markdown("🔗 [Get Free Groq API Key](https://console.groq.com/keys)")
         else:
             api_key = st.text_input(
-                "HuggingFace Token",
+                "HuggingFace API Token",
                 type="password",
-                value=st.session_state.api_key,
-                placeholder="hf_...",
-                help="Get free token at huggingface.co"
+                value=st.session_state.get("api_key", ""),
+                help="Get your free token from huggingface.co"
             )
-            st.markdown("[🔗 Get Free HF Token](https://huggingface.co/settings/tokens)")
-            if api_key:
-                st.session_state.api_key = api_key
-                st.success("✅ Key entered")
+            st.markdown("🔗 [Get Free HF Token](https://huggingface.co/settings/tokens)")
+        
+        if api_key:
+            st.session_state.api_key = api_key
+            st.success("✅ API Key configured")
     
     st.divider()
     
@@ -801,3 +807,4 @@ st.markdown("""
     Built with RAG + Streamlit
 </div>
 """, unsafe_allow_html=True)
+
