@@ -1,38 +1,24 @@
 """
-Resume Chatbot - Streamlit Cloud Version
-Using FAISS for vector storage (more compatible than ChromaDB)
-Uses Groq API (free) for LLM inference
+Resume Chatbot - Streamlit Cloud Version (v3 - Simplified)
+No FAISS, No LangChain - Pure Python + sklearn
+Uses Groq API (free) or HuggingFace for LLM inference
 """
 
 import streamlit as st
-import os
 import requests
-from typing import List, Dict, Tuple
 import numpy as np
+from typing import List, Dict, Tuple
+from dataclasses import dataclass, field
 
-# LangChain imports
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.schema import Document
+# sklearn for similarity
+from sklearn.metrics.pairwise import cosine_similarity
 
-# ============== API KEY CONFIGURATION ==============
+# sentence-transformers for embeddings
+from sentence_transformers import SentenceTransformer
 
-def get_api_key(provider: str) -> str:
-    """Get API key from secrets or session state"""
-    
-    # Try to get from Streamlit secrets first
-    if "Groq" in provider:
-        if "GROQ_API_KEY" in st.secrets:
-            return st.secrets["GROQ_API_KEY"]
-    else:
-        if "HUGGINGFACE_API_KEY" in st.secrets:
-            return st.secrets["HUGGINGFACE_API_KEY"]
-    
-    # Fall back to session state (user input)
-    return st.session_state.get("api_key", "")
-
-# Page config
+# =====================================================
+# PAGE CONFIG - MUST BE FIRST STREAMLIT COMMAND
+# =====================================================
 st.set_page_config(
     page_title="Vijai Venkatesan - AI Resume Assistant",
     page_icon="🤖",
@@ -40,7 +26,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ============== RESUME CONTENT ==============
+# =====================================================
+# RESUME CONTENT
+# =====================================================
 RESUME_CONTENT = """
 VIJAI VENKATESAN
 Contact Information:
@@ -230,87 +218,154 @@ CURRENT ROLE: Associate Consultant - AI/ML at Datamatics
 SPECIALIZATION: AI/ML, NLP, Generative AI, LLM, Document Processing, Invoice Automation
 """
 
-# ============== RAG FUNCTIONS ==============
 
-@st.cache_resource(show_spinner=False)
-def initialize_embeddings():
-    """Initialize HuggingFace embeddings"""
-    return HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
+# =====================================================
+# SIMPLE RAG IMPLEMENTATION (No external dependencies)
+# =====================================================
+
+@dataclass
+class Chunk:
+    """A chunk of text with metadata"""
+    text: str
+    section: str
+    index: int
 
 
-@st.cache_resource(show_spinner=False)
-def create_vector_store(_embeddings):
-    """Create FAISS vector store from resume content"""
+class SimpleRAG:
+    """Simple RAG implementation using sklearn"""
     
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", ", ", " ", ""]
-    )
+    def __init__(self):
+        self.chunks: List[Chunk] = []
+        self.embeddings: np.ndarray = None
+        self.model: SentenceTransformer = None
     
-    chunks = text_splitter.create_documents([RESUME_CONTENT])
+    def load_model(self):
+        """Load the embedding model"""
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
     
-    # Add metadata to chunks
-    section_keywords = {
-        "PROFESSIONAL SUMMARY": "Summary",
-        "SUMMARY": "Summary",
-        "WORK EXPERIENCE": "Work Experience",
-        "Position:": "Work Experience",
-        "TECHNICAL SKILLS": "Skills",
-        "SKILLS": "Skills",
-        "EDUCATION": "Education",
-        "CERTIFICATIONS": "Certifications",
-        "AWARDS": "Awards",
-        "Contact": "Contact Information"
-    }
-    
-    for i, chunk in enumerate(chunks):
-        chunk.metadata["chunk_id"] = i
-        chunk.metadata["source"] = "resume"
+    def split_text(self, text: str, chunk_size: int = 400, overlap: int = 50) -> List[str]:
+        """Split text into overlapping chunks"""
+        sentences = text.replace('\n\n', '\n').split('\n')
+        chunks = []
+        current_chunk = []
+        current_length = 0
         
-        # Determine section
-        content_upper = chunk.page_content.upper()
-        assigned_section = "General"
-        for keyword, section in section_keywords.items():
-            if keyword.upper() in content_upper:
-                assigned_section = section
-                break
-        chunk.metadata["section"] = assigned_section
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            sentence_length = len(sentence)
+            
+            if current_length + sentence_length > chunk_size and current_chunk:
+                # Save current chunk
+                chunks.append('\n'.join(current_chunk))
+                
+                # Keep some overlap
+                overlap_text = current_chunk[-2:] if len(current_chunk) >= 2 else current_chunk
+                current_chunk = overlap_text.copy()
+                current_length = sum(len(s) for s in current_chunk)
+            
+            current_chunk.append(sentence)
+            current_length += sentence_length
+        
+        # Don't forget the last chunk
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        return chunks
     
-    # Create FAISS vector store
-    vector_store = FAISS.from_documents(chunks, _embeddings)
+    def identify_section(self, text: str) -> str:
+        """Identify which section a chunk belongs to"""
+        text_upper = text.upper()
+        
+        if any(kw in text_upper for kw in ['PROFESSIONAL SUMMARY', 'SUMMARY', 'RESULTS-DRIVEN']):
+            return "Summary"
+        elif any(kw in text_upper for kw in ['WORK EXPERIENCE', 'POSITION:', 'COMPANY:', 'DURATION:']):
+            return "Work Experience"
+        elif any(kw in text_upper for kw in ['TECHNICAL SKILLS', 'PROGRAMMING', 'FRAMEWORKS']):
+            return "Skills"
+        elif any(kw in text_upper for kw in ['EDUCATION', 'DEGREE:', 'INSTITUTION:']):
+            return "Education"
+        elif any(kw in text_upper for kw in ['CERTIFICATION', 'INSTRUCTOR:', 'PLATFORM:']):
+            return "Certifications"
+        elif any(kw in text_upper for kw in ['AWARD', 'RECOGNITION', 'WINNER']):
+            return "Awards"
+        elif any(kw in text_upper for kw in ['CONTACT', 'EMAIL:', 'PHONE:', 'LINKEDIN']):
+            return "Contact"
+        else:
+            return "General"
     
-    return vector_store
+    def index_document(self, text: str):
+        """Index a document by splitting and embedding"""
+        # Split into chunks
+        raw_chunks = self.split_text(text)
+        
+        # Create Chunk objects with metadata
+        self.chunks = []
+        for i, chunk_text in enumerate(raw_chunks):
+            section = self.identify_section(chunk_text)
+            self.chunks.append(Chunk(text=chunk_text, section=section, index=i))
+        
+        # Create embeddings
+        chunk_texts = [c.text for c in self.chunks]
+        self.embeddings = self.model.encode(chunk_texts, convert_to_numpy=True, show_progress_bar=False)
+    
+    def search(self, query: str, top_k: int = 4) -> List[Tuple[Chunk, float]]:
+        """Search for relevant chunks"""
+        # Embed query
+        query_embedding = self.model.encode([query], convert_to_numpy=True, show_progress_bar=False)
+        
+        # Calculate similarities
+        similarities = cosine_similarity(query_embedding, self.embeddings)[0]
+        
+        # Get top-k indices
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+        
+        # Return chunks with scores
+        results = []
+        for idx in top_indices:
+            results.append((self.chunks[idx], float(similarities[idx])))
+        
+        return results
 
 
-def retrieve_context(vector_store, query: str, k: int = 4) -> Tuple[str, List[Dict]]:
-    """Retrieve relevant context from vector store"""
-    docs = vector_store.similarity_search(query, k=k)
+@st.cache_resource(show_spinner=True)
+def initialize_rag() -> SimpleRAG:
+    """Initialize and cache the RAG system"""
+    rag = SimpleRAG()
+    rag.load_model()
+    rag.index_document(RESUME_CONTENT)
+    return rag
+
+
+def get_context(rag: SimpleRAG, query: str, top_k: int = 4) -> Tuple[str, List[Dict]]:
+    """Get relevant context for a query"""
+    results = rag.search(query, top_k=top_k)
     
     context_parts = []
     sources = []
     
-    for doc in docs:
-        context_parts.append(doc.page_content)
+    for chunk, score in results:
+        context_parts.append(chunk.text)
         sources.append({
-            "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-            "section": doc.metadata.get("section", "General")
+            "content": chunk.text[:250] + "..." if len(chunk.text) > 250 else chunk.text,
+            "section": chunk.section,
+            "relevance": f"{score:.2%}"
         })
     
-    context = "\n\n".join(context_parts)
+    context = "\n\n---\n\n".join(context_parts)
     return context, sources
 
 
-# ============== LLM FUNCTIONS ==============
+# =====================================================
+# LLM API FUNCTIONS
+# =====================================================
 
-def query_groq(prompt: str, api_key: str) -> str:
-    """Query Groq API (free tier available)"""
+def call_groq_api(prompt: str, api_key: str) -> str:
+    """Call Groq API for LLM inference"""
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -321,10 +376,13 @@ def query_groq(prompt: str, api_key: str) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a helpful AI assistant representing Vijai Venkatesan, an AI/ML Engineer. Answer questions about his professional background based on the provided context. Be professional, accurate, and helpful."
+                "content": """You are a professional AI assistant representing Vijai Venkatesan, an experienced AI/ML Engineer. 
+Your job is to answer questions about his professional background, skills, experience, and achievements.
+Be helpful, professional, and accurate. Use specific details from the provided context.
+If information is not available in the context, politely say so."""
             },
             {
-                "role": "user",
+                "role": "user", 
                 "content": prompt
             }
         ],
@@ -333,98 +391,104 @@ def query_groq(prompt: str, api_key: str) -> str:
     }
     
     try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
+            return response.json()["choices"][0]["message"]["content"]
+        elif response.status_code == 401:
+            return "❌ **Invalid API Key.** Please check your Groq API key and try again."
+        elif response.status_code == 429:
+            return "⚠️ **Rate limit exceeded.** Please wait a moment and try again."
         else:
-            error_msg = response.json().get("error", {}).get("message", "Unknown error")
-            return f"API Error: {error_msg}"
-            
+            error_detail = response.json().get("error", {}).get("message", "Unknown error")
+            return f"❌ **API Error ({response.status_code}):** {error_detail}"
+    
     except requests.exceptions.Timeout:
-        return "Request timed out. Please try again."
+        return "⏱️ **Request timed out.** Please try again."
+    except requests.exceptions.ConnectionError:
+        return "🔌 **Connection error.** Please check your internet connection."
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"❌ **Error:** {str(e)}"
 
 
-def query_huggingface(prompt: str, api_key: str) -> str:
-    """Query HuggingFace Inference API"""
-    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+def call_huggingface_api(prompt: str, api_key: str) -> str:
+    """Call HuggingFace Inference API"""
+    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    
     headers = {"Authorization": f"Bearer {api_key}"}
     
-    formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+    formatted_prompt = f"""<s>[INST] You are a helpful AI assistant representing Vijai Venkatesan, an AI/ML Engineer.
+Answer the question based on the provided context. Be professional and accurate.
+
+{prompt} [/INST]"""
     
     payload = {
         "inputs": formatted_prompt,
         "parameters": {
             "max_new_tokens": 512,
             "temperature": 0.7,
-            "return_full_text": False,
-            "do_sample": True
+            "return_full_text": False
         }
     }
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 200:
             result = response.json()
             if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "No response generated")
+                return result[0].get("generated_text", "No response generated.")
             return str(result)
         elif response.status_code == 503:
-            return "Model is loading, please try again in a few seconds..."
+            return "⏳ **Model is loading.** Please wait 20-30 seconds and try again."
+        elif response.status_code == 401:
+            return "❌ **Invalid API Token.** Please check your HuggingFace token."
         else:
-            return f"API Error: {response.status_code}"
-            
-    except requests.exceptions.Timeout:
-        return "Request timed out. Please try again."
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-def generate_response(question: str, context: str, api_key: str, provider: str) -> str:
-    """Generate response using selected LLM provider"""
+            return f"❌ **API Error ({response.status_code})**"
     
-    prompt = f"""Based on the following resume information about Vijai Venkatesan, answer the question.
-Be specific, professional, and use details from the context when available.
-If the information is not in the context, say so politely.
+    except requests.exceptions.Timeout:
+        return "⏱️ **Request timed out.** Please try again."
+    except Exception as e:
+        return f"❌ **Error:** {str(e)}"
 
-RESUME CONTEXT:
+
+def generate_answer(question: str, context: str, api_key: str, provider: str) -> str:
+    """Generate answer using selected LLM provider"""
+    
+    prompt = f"""Based on the following resume information about Vijai Venkatesan, please answer the question.
+Use specific details from the context. Be professional and helpful.
+
+CONTEXT FROM RESUME:
 {context}
 
 QUESTION: {question}
 
-ANSWER:"""
+Please provide a clear, informative answer:"""
     
-    if provider == "Groq (Recommended - Faster)":
-        return query_groq(prompt, api_key)
+    if "Groq" in provider:
+        return call_groq_api(prompt, api_key)
     else:
-        return query_huggingface(prompt, api_key)
+        return call_huggingface_api(prompt, api_key)
 
 
-# ============== UI STYLING ==============
+# =====================================================
+# CUSTOM CSS STYLING
+# =====================================================
 
 st.markdown("""
 <style>
-    /* Main header */
+    /* Header styles */
     .main-header {
         font-size: 2.5rem;
-        font-weight: bold;
-        background: linear-gradient(90deg, #1E88E5, #7C4DFF);
+        font-weight: 700;
+        background: linear-gradient(90deg, #1E88E5 0%, #7C4DFF 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         text-align: center;
-        margin-bottom: 0.5rem;
+        padding: 0.5rem 0;
+        margin-bottom: 0;
     }
     
-    /* Subheader */
     .sub-header {
         font-size: 1.1rem;
         color: #666;
@@ -432,90 +496,80 @@ st.markdown("""
         margin-bottom: 2rem;
     }
     
-    /* Info card in sidebar */
-    .info-card {
+    /* Profile card */
+    .profile-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 1.5rem;
+        padding: 1.25rem;
         border-radius: 1rem;
         margin-bottom: 1rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
     }
     
-    .info-card h3 {
+    .profile-card h3 {
         margin: 0 0 0.5rem 0;
-        font-size: 1.3rem;
+        font-size: 1.2rem;
     }
     
-    .info-card p {
-        margin: 0.3rem 0;
-        font-size: 0.9rem;
+    .profile-card p {
+        margin: 0.25rem 0;
+        font-size: 0.85rem;
+        opacity: 0.95;
     }
     
-    .info-card a {
-        color: #ffffff;
+    .profile-card a {
+        color: white !important;
         text-decoration: underline;
     }
     
     /* Source card */
     .source-card {
-        background-color: #f0f7ff;
-        border-left: 3px solid #1E88E5;
-        padding: 0.75rem;
+        background: #f8f9fa;
+        border-left: 4px solid #1E88E5;
+        padding: 0.75rem 1rem;
         margin: 0.5rem 0;
         border-radius: 0 0.5rem 0.5rem 0;
         font-size: 0.85rem;
     }
     
-    .source-section {
+    .source-header {
         color: #1E88E5;
-        font-weight: bold;
-        margin-bottom: 0.3rem;
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
     }
     
-    /* Stats container */
-    .stats-container {
-        display: flex;
-        justify-content: space-around;
-        margin: 1rem 0;
+    .source-content {
+        color: #444;
+        line-height: 1.4;
     }
     
-    .stat-box {
-        background-color: #f5f5f5;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
+    /* Welcome card */
+    .welcome-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf0 100%);
+        padding: 2rem;
+        border-radius: 1rem;
         text-align: center;
-        flex: 1;
-        margin: 0 0.25rem;
-    }
-    
-    .stat-number {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #1E88E5;
-    }
-    
-    .stat-label {
-        font-size: 0.8rem;
-        color: #666;
-    }
-    
-    /* Custom button styling */
-    .stButton > button {
-        width: 100%;
-        border-radius: 0.5rem;
-        font-size: 0.85rem;
-        padding: 0.5rem;
+        border: 1px solid #e0e0e0;
+        margin: 1rem 0;
     }
     
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    
+    /* Button hover effects */
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ============== INITIALIZE SESSION STATE ==============
+# =====================================================
+# SESSION STATE INITIALIZATION
+# =====================================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -524,12 +578,14 @@ if "api_key" not in st.session_state:
     st.session_state.api_key = ""
 
 
-# ============== SIDEBAR ==============
+# =====================================================
+# SIDEBAR
+# =====================================================
 
 with st.sidebar:
     # Profile Card
     st.markdown("""
-    <div class="info-card">
+    <div class="profile-card">
         <h3>👤 Vijai Venkatesan</h3>
         <p><strong>Associate Consultant - AI/ML</strong></p>
         <p>🏢 Datamatics (TruAI Division)</p>
@@ -541,222 +597,207 @@ with st.sidebar:
     
     # Quick Stats
     st.markdown("### 📊 Quick Stats")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Experience", "~7 Years")
-    with col2:
-        st.metric("Projects", "12+")
+    c1, c2 = st.columns(2)
+    c1.metric("Experience", "~7 Years")
+    c2.metric("Projects", "12+")
     
-    col3, col4 = st.columns(2)
-    with col3:
-        st.metric("Certifications", "9+")
-    with col4:
-        st.metric("Awards", "4")
+    c3, c4 = st.columns(2)
+    c3.metric("Certs", "9+")
+    c4.metric("Awards", "4")
     
-    st.markdown("---")
+    st.divider()
     
     # API Configuration
     st.markdown("### 🔑 API Configuration")
     
     provider = st.selectbox(
-        "Select LLM Provider",
-        ["Groq (Recommended - Faster)", "HuggingFace (Backup)"],
-        help="Groq is faster and more reliable. Both are free!"
+        "LLM Provider",
+        ["Groq (Recommended)", "HuggingFace"],
+        help="Groq is faster. Both are FREE!"
     )
     
-    # Check if API key is in secrets
-    if "Groq" in provider:
-        secret_key = st.secrets.get("GROQ_API_KEY", "")
-    else:
-        secret_key = st.secrets.get("HUGGINGFACE_API_KEY", "")
+    # Check for secrets
+    has_groq_secret = False
+    has_hf_secret = False
     
-    if secret_key:
-        # API key is pre-configured in secrets
-        api_key = secret_key
-        st.success("✅ API Key pre-configured")
-    else:
-        # Let user input API key
-        if "Groq" in provider:
+    try:
+        has_groq_secret = "GROQ_API_KEY" in st.secrets
+        has_hf_secret = "HUGGINGFACE_API_KEY" in st.secrets
+    except:
+        pass
+    
+    if "Groq" in provider:
+        if has_groq_secret:
+            api_key = st.secrets["GROQ_API_KEY"]
+            st.success("✅ API Key loaded from secrets")
+        else:
             api_key = st.text_input(
                 "Groq API Key",
                 type="password",
-                value=st.session_state.get("api_key", ""),
-                help="Get your free API key from console.groq.com"
+                value=st.session_state.api_key,
+                placeholder="gsk_...",
+                help="Get free key at console.groq.com"
             )
-            st.markdown("🔗 [Get Free Groq API Key](https://console.groq.com/keys)")
+            st.markdown("[🔗 Get Free Groq Key](https://console.groq.com/keys)")
+            if api_key:
+                st.session_state.api_key = api_key
+                st.success("✅ Key entered")
+    else:
+        if has_hf_secret:
+            api_key = st.secrets["HUGGINGFACE_API_KEY"]
+            st.success("✅ API Key loaded from secrets")
         else:
             api_key = st.text_input(
-                "HuggingFace API Token",
+                "HuggingFace Token",
                 type="password",
-                value=st.session_state.get("api_key", ""),
-                help="Get your free token from huggingface.co"
+                value=st.session_state.api_key,
+                placeholder="hf_...",
+                help="Get free token at huggingface.co"
             )
-            st.markdown("🔗 [Get Free HF Token](https://huggingface.co/settings/tokens)")
-        
-        if api_key:
-            st.session_state.api_key = api_key
-            st.success("✅ API Key configured")
+            st.markdown("[🔗 Get Free HF Token](https://huggingface.co/settings/tokens)")
+            if api_key:
+                st.session_state.api_key = api_key
+                st.success("✅ Key entered")
     
-    st.markdown("---")
+    st.divider()
     
     # Suggested Questions
-    st.markdown("### 💡 Try These Questions")
+    st.markdown("### 💡 Quick Questions")
     
-    suggestions = [
-        "What is Vijai's total experience?",
-        "What are his main technical skills?",
+    questions = [
+        "What is Vijai's experience?",
+        "What are his main skills?",
         "Tell me about his current role",
-        "What projects has he worked on?",
-        "What accuracy did he achieve in his projects?",
+        "What projects has he done?",
+        "What accuracy did he achieve?",
         "What certifications does he have?",
-        "What is his educational background?",
+        "What is his education?",
         "What awards has he received?"
     ]
     
-    for i, suggestion in enumerate(suggestions):
-        if st.button(f"📌 {suggestion}", key=f"sug_{i}", use_container_width=True):
-            st.session_state.pending_question = suggestion
+    for i, q in enumerate(questions):
+        if st.button(f"📌 {q}", key=f"q_{i}", use_container_width=True):
+            st.session_state.pending_question = q
     
-    st.markdown("---")
+    st.divider()
     
-    # Clear Chat Button
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
+    if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
     
-    # Footer
     st.markdown("""
-    ---
-    <div style="text-align: center; font-size: 0.75rem; color: #888;">
-        Built with RAG + FAISS + Streamlit<br>
-        🚀 Powered by Groq/HuggingFace
+    <div style="text-align:center; font-size:0.75rem; color:#888; margin-top:1rem;">
+        Built with ❤️<br>RAG + Streamlit
     </div>
     """, unsafe_allow_html=True)
 
 
-# ============== MAIN CONTENT ==============
+# =====================================================
+# MAIN CONTENT
+# =====================================================
 
 # Header
 st.markdown('<h1 class="main-header">🤖 AI Resume Assistant</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Ask me anything about Vijai Venkatesan\'s professional background, skills, and experience</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Ask me anything about Vijai Venkatesan\'s professional background</p>', unsafe_allow_html=True)
 
-# Initialize RAG components
-with st.spinner("🔄 Initializing AI assistant..."):
-    embeddings = initialize_embeddings()
-    vector_store = create_vector_store(embeddings)
+# Initialize RAG
+with st.spinner("🔄 Loading AI..."):
+    rag = initialize_rag()
 
-# Display chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Display chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
         
-        # Show sources if available
-        if message["role"] == "assistant" and "sources" in message and message["sources"]:
-            with st.expander("📚 View Sources Used"):
-                for src in message["sources"]:
+        if msg["role"] == "assistant" and msg.get("sources"):
+            with st.expander("📚 View Sources"):
+                for src in msg["sources"]:
                     st.markdown(f"""
                     <div class="source-card">
-                        <div class="source-section">📁 {src.get('section', 'General')}</div>
-                        <div>{src.get('content', '')}</div>
+                        <div class="source-header">📁 {src['section']} ({src['relevance']})</div>
+                        <div class="source-content">{src['content']}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
-# Handle pending question from sidebar
+# Handle sidebar question click
 if "pending_question" in st.session_state:
     question = st.session_state.pending_question
     del st.session_state.pending_question
     
     if not api_key:
-        st.error("⚠️ Please enter your API key in the sidebar to continue.")
+        st.error("⚠️ Please enter your API key in the sidebar.")
     else:
-        # Add user message
         st.session_state.messages.append({"role": "user", "content": question})
         
-        # Retrieve context
-        context, sources = retrieve_context(vector_store, question)
+        context, sources = get_context(rag, question)
         
-        # Generate response
         with st.spinner("🤔 Thinking..."):
-            response = generate_response(question, context, api_key, provider)
+            answer = generate_answer(question, context, api_key, provider)
         
-        # Add assistant message
         st.session_state.messages.append({
             "role": "assistant",
-            "content": response,
+            "content": answer,
             "sources": sources
         })
-        
         st.rerun()
 
 # Chat input
-if prompt := st.chat_input("Ask about Vijai's experience, skills, projects, or anything from his resume..."):
+if prompt := st.chat_input("Ask about experience, skills, projects..."):
     if not api_key:
-        st.error("⚠️ Please enter your API key in the sidebar to start chatting.")
+        st.error("⚠️ Please enter your API key in the sidebar first.")
     else:
-        # Add user message to state and display
+        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Retrieve context
-        context, sources = retrieve_context(vector_store, prompt)
+        # Get context and generate response
+        context, sources = get_context(rag, prompt)
         
-        # Generate response
         with st.chat_message("assistant"):
             with st.spinner("🤔 Thinking..."):
-                response = generate_response(prompt, context, api_key, provider)
+                answer = generate_answer(prompt, context, api_key, provider)
             
-            st.markdown(response)
+            st.markdown(answer)
             
-            # Show sources
             if sources:
-                with st.expander("📚 View Sources Used"):
+                with st.expander("📚 View Sources"):
                     for src in sources:
                         st.markdown(f"""
                         <div class="source-card">
-                            <div class="source-section">📁 {src.get('section', 'General')}</div>
-                            <div>{src.get('content', '')}</div>
+                            <div class="source-header">📁 {src['section']} ({src['relevance']})</div>
+                            <div class="source-content">{src['content']}</div>
                         </div>
                         """, unsafe_allow_html=True)
         
-        # Add to message history
+        # Save to history
         st.session_state.messages.append({
             "role": "assistant",
-            "content": response,
+            "content": answer,
             "sources": sources
         })
 
-# Welcome message if no chat history
+# Welcome message when no chat
 if not st.session_state.messages:
     st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
-        padding: 2rem;
-        border-radius: 1rem;
-        text-align: center;
-        margin: 2rem 0;
-    ">
+    <div class="welcome-card">
         <h3>👋 Welcome!</h3>
-        <p>I'm an AI assistant that can answer questions about <strong>Vijai Venkatesan's</strong> professional background.</p>
-        <p>Try asking about:</p>
-        <ul style="text-align: left; display: inline-block;">
-            <li>🎯 Work experience and current role</li>
-            <li>💻 Technical skills and expertise</li>
-            <li>🏆 Projects and achievements</li>
-            <li>📜 Certifications and education</li>
-            <li>🥇 Awards and recognition</li>
-        </ul>
-        <p><em>Click a suggested question in the sidebar or type your own below!</em></p>
+        <p>I'm an AI assistant that answers questions about <strong>Vijai Venkatesan's</strong> professional background.</p>
+        <br>
+        <p><strong>Ask about:</strong></p>
+        <p>🎯 Experience &nbsp;|&nbsp; 💻 Skills &nbsp;|&nbsp; 🏆 Projects &nbsp;|&nbsp; 📜 Certifications &nbsp;|&nbsp; 🥇 Awards</p>
+        <br>
+        <p><em>👈 Enter your API key in the sidebar to start!</em></p>
     </div>
     """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
 st.markdown("""
-<div style="text-align: center; color: #888; font-size: 0.85rem;">
-    💼 <a href="https://linkedin.com/in/vijai-v-2b89841a3" target="_blank">Connect on LinkedIn</a> | 
-    📧 <a href="mailto:vijaibt1@gmail.com">vijaibt1@gmail.com</a> | 
-    Built with ❤️ using RAG, FAISS & Streamlit
+<div style="text-align:center; color:#888; font-size:0.85rem;">
+    💼 <a href="https://linkedin.com/in/vijai-v-2b89841a3" target="_blank">LinkedIn</a> &nbsp;|&nbsp;
+    📧 <a href="mailto:vijaibt1@gmail.com">Email</a> &nbsp;|&nbsp;
+    Built with RAG + Streamlit
 </div>
 """, unsafe_allow_html=True)
