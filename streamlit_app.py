@@ -1,7 +1,6 @@
 """
-Resume Chatbot - Groq Edition (Lightweight)
-Using TF-IDF for embeddings (no PyTorch needed)
-Multiple Groq Models | RAG-powered
+Resume Chatbot - Groq Edition (Latest Models)
+Using TF-IDF for embeddings | Multiple Groq Models
 """
 
 import streamlit as st
@@ -24,33 +23,38 @@ st.set_page_config(
 )
 
 # =====================================================
-# GROQ MODELS
+# GROQ MODELS (Updated - Latest Active Models)
 # =====================================================
 GROQ_MODELS = {
-    "Llama 3.1 8B (Fast)": {
+    "Llama 3.1 8B Instant": {
         "id": "llama-3.1-8b-instant",
-        "description": "Fast responses, good for quick queries",
+        "description": "Very fast, 131K context",
         "icon": "⚡"
     },
-    "Llama 3.3 70B (Powerful)": {
+    "Llama 3.3 70B Versatile": {
         "id": "llama-3.3-70b-versatile",
-        "description": "Most capable, detailed responses",
+        "description": "Most powerful, detailed responses",
         "icon": "🚀"
     },
-    "Llama 3.1 70B": {
-        "id": "llama-3.1-70b-versatile",
-        "description": "Balanced speed and quality",
-        "icon": "⭐"
+    "Llama 4 Scout 17B": {
+        "id": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "description": "Latest Llama 4, fast & capable",
+        "icon": "🦙"
     },
-    "Mixtral 8x7B": {
-        "id": "mixtral-8x7b-32768",
-        "description": "Great for complex questions",
-        "icon": "🔥"
+    "Qwen 3 32B": {
+        "id": "qwen/qwen3-32b",
+        "description": "Alibaba's powerful model",
+        "icon": "🌟"
     },
-    "Gemma 2 9B": {
-        "id": "gemma2-9b-it",
-        "description": "Google's efficient model",
-        "icon": "💎"
+    "Kimi K2 Instruct": {
+        "id": "moonshotai/kimi-k2-instruct",
+        "description": "Moonshot AI model",
+        "icon": "🌙"
+    },
+    "Compound (Groq)": {
+        "id": "groq/compound",
+        "description": "Groq's compound AI",
+        "icon": "🔮"
     }
 }
 
@@ -252,7 +256,7 @@ KEY FACTS:
 
 
 # =====================================================
-# LIGHTWEIGHT RAG (TF-IDF based - No PyTorch!)
+# LIGHTWEIGHT RAG (TF-IDF)
 # =====================================================
 
 @dataclass
@@ -263,18 +267,13 @@ class Chunk:
 
 
 class LightweightRAG:
-    """RAG using TF-IDF - no heavy dependencies"""
-    
     def __init__(self):
         self.chunks: List[Chunk] = []
         self.vectorizer: TfidfVectorizer = None
         self.tfidf_matrix = None
     
     def split_text(self, text: str) -> List[str]:
-        """Split text into chunks based on double newlines"""
-        # Split by sections
         sections = text.split('\n\n')
-        
         chunks = []
         current_chunk = []
         current_length = 0
@@ -299,7 +298,6 @@ class LightweightRAG:
         return chunks
     
     def identify_section(self, text: str) -> str:
-        """Identify section from text content"""
         text_upper = text.upper()
         
         if any(kw in text_upper for kw in ['PROFESSIONAL SUMMARY', 'RESULTS-DRIVEN']):
@@ -324,7 +322,6 @@ class LightweightRAG:
             return "General"
     
     def index_document(self, text: str):
-        """Index document using TF-IDF"""
         raw_chunks = self.split_text(text)
         
         self.chunks = []
@@ -333,7 +330,6 @@ class LightweightRAG:
                 section = self.identify_section(chunk_text)
                 self.chunks.append(Chunk(text=chunk_text, section=section, index=i))
         
-        # Create TF-IDF vectors
         chunk_texts = [c.text for c in self.chunks]
         self.vectorizer = TfidfVectorizer(
             stop_words='english',
@@ -343,7 +339,6 @@ class LightweightRAG:
         self.tfidf_matrix = self.vectorizer.fit_transform(chunk_texts)
     
     def search(self, query: str, top_k: int = 4) -> List[Tuple[Chunk, float]]:
-        """Search for relevant chunks"""
         query_vector = self.vectorizer.transform([query])
         similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
         
@@ -351,10 +346,9 @@ class LightweightRAG:
         
         results = []
         for idx in top_indices:
-            if similarities[idx] > 0:  # Only include if there's some relevance
+            if similarities[idx] > 0:
                 results.append((self.chunks[idx], float(similarities[idx])))
         
-        # If no relevant results, return top chunks anyway
         if not results:
             for idx in top_indices[:2]:
                 results.append((self.chunks[idx], float(similarities[idx])))
@@ -364,14 +358,12 @@ class LightweightRAG:
 
 @st.cache_resource
 def initialize_rag() -> LightweightRAG:
-    """Initialize and cache the RAG system"""
     rag = LightweightRAG()
     rag.index_document(RESUME_CONTENT)
     return rag
 
 
 def get_context(rag: LightweightRAG, query: str, top_k: int = 4) -> Tuple[str, List[Dict]]:
-    """Get relevant context for a query"""
     results = rag.search(query, top_k=top_k)
     
     context_parts = []
@@ -394,7 +386,6 @@ def get_context(rag: LightweightRAG, query: str, top_k: int = 4) -> Tuple[str, L
 # =====================================================
 
 def get_api_key() -> str:
-    """Get API key from Streamlit secrets"""
     try:
         return st.secrets["GROQ_API_KEY"]
     except:
@@ -402,7 +393,6 @@ def get_api_key() -> str:
 
 
 def call_groq_api(prompt: str, model_id: str) -> str:
-    """Call Groq API"""
     api_key = get_api_key()
     
     if not api_key:
@@ -410,12 +400,12 @@ def call_groq_api(prompt: str, model_id: str) -> str:
 
 Please add your Groq API key to Streamlit secrets:
 
-1. Go to your app settings on [share.streamlit.io](https://share.streamlit.io)
+1. Go to app settings on [share.streamlit.io](https://share.streamlit.io)
 2. Click **Settings** → **Secrets**
 3. Add: `GROQ_API_KEY = "gsk_your_key_here"`
-4. Save and reboot the app
+4. Save and reboot
 
-🔗 Get your free key at [console.groq.com](https://console.groq.com/keys)"""
+🔗 [Get free key](https://console.groq.com/keys)"""
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -436,11 +426,11 @@ Your role:
 - If information isn't available, say so politely
 - Keep responses concise but informative
 
-Key facts to remember:
-- Nearly 7 years of experience
-- Current role: Associate Consultant - AI/ML at Datamatics
-- Key achievement: 90% accuracy (Ingram Micro), 93.40% accuracy (BelleTire)
-- Specializes in: AI/ML, NLP, Generative AI, LLM, Document Processing"""
+Key facts:
+- ~7 years experience
+- Current: Associate Consultant - AI/ML at Datamatics
+- Achievements: 90% accuracy (Ingram Micro), 93.40% (BelleTire)
+- Specializes in: AI/ML, NLP, GenAI, LLM, Document Processing"""
             },
             {
                 "role": "user",
@@ -456,7 +446,7 @@ Key facts to remember:
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=30
+            timeout=60
         )
         
         if response.status_code == 200:
@@ -464,9 +454,14 @@ Key facts to remember:
         elif response.status_code == 401:
             return "❌ **Invalid API Key.** Please check your Groq API key."
         elif response.status_code == 429:
-            return "⚠️ **Rate limit.** Please wait a moment and try again."
+            return "⚠️ **Rate limit.** Please wait and try again."
+        elif response.status_code == 400:
+            error_msg = response.json().get("error", {}).get("message", "")
+            if "decommissioned" in error_msg.lower():
+                return "⚠️ **Model unavailable.** Please select a different model."
+            return f"❌ **Error:** {error_msg[:200]}"
         else:
-            return f"❌ **Error ({response.status_code}):** {response.text[:200]}"
+            return f"❌ **Error ({response.status_code})**"
     
     except requests.exceptions.Timeout:
         return "⏱️ **Timeout.** Please try again."
@@ -475,7 +470,6 @@ Key facts to remember:
 
 
 def generate_answer(question: str, context: str, model_id: str) -> str:
-    """Generate answer"""
     prompt = f"""Based on the following resume information about Vijai Venkatesan, answer the question.
 Use specific details from the context.
 
@@ -585,7 +579,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "selected_model" not in st.session_state:
-    st.session_state.selected_model = "Llama 3.1 8B (Fast)"
+    st.session_state.selected_model = "Llama 3.1 8B Instant"
 
 
 # =====================================================
@@ -593,7 +587,6 @@ if "selected_model" not in st.session_state:
 # =====================================================
 
 with st.sidebar:
-    # Profile
     st.markdown("""
     <div class="profile-card">
         <h3>👤 Vijai Venkatesan</h3>
@@ -605,7 +598,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    # Stats
     st.markdown("### 📊 Quick Stats")
     c1, c2 = st.columns(2)
     c1.metric("Experience", "~7 Years")
@@ -616,7 +608,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Model Selection
     st.markdown("### 🤖 Select AI Model")
     
     selected_model = st.selectbox(
@@ -634,7 +625,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Quick Questions
     st.markdown("### 💡 Quick Questions")
     
     questions = [
@@ -672,12 +662,9 @@ with st.sidebar:
 st.markdown('<h1 class="main-header">🤖 AI Resume Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Ask me anything about Vijai Venkatesan\'s professional background</p>', unsafe_allow_html=True)
 
-# Initialize RAG (very fast now!)
 rag = initialize_rag()
-
 current_model_id = GROQ_MODELS[st.session_state.selected_model]["id"]
 
-# Chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -694,7 +681,6 @@ for msg in st.session_state.messages:
                         </div>
                         """, unsafe_allow_html=True)
 
-# Handle quick question
 if "pending_question" in st.session_state:
     question = st.session_state.pending_question
     del st.session_state.pending_question
@@ -713,7 +699,6 @@ if "pending_question" in st.session_state:
     })
     st.rerun()
 
-# Chat input
 if prompt := st.chat_input("Ask about experience, skills, projects..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
@@ -746,21 +731,19 @@ if prompt := st.chat_input("Ask about experience, skills, projects..."):
         "model": st.session_state.selected_model
     })
 
-# Welcome
 if not st.session_state.messages:
     st.markdown(f"""
     <div class="welcome-card">
         <h3>👋 Welcome!</h3>
-        <p>I'm an AI assistant powered by <strong>{st.session_state.selected_model}</strong></p>
+        <p>I'm powered by <strong>{st.session_state.selected_model}</strong></p>
         <p>Ask me about <strong>Vijai Venkatesan's</strong> professional background.</p>
         <br>
         <p>🎯 Experience &nbsp;|&nbsp; 💻 Skills &nbsp;|&nbsp; 🏆 Projects &nbsp;|&nbsp; 📜 Certifications &nbsp;|&nbsp; 🥇 Awards</p>
         <br>
-        <p><em>👈 Click a quick question or type your own below!</em></p>
+        <p><em>👈 Click a quick question or type below!</em></p>
     </div>
     """, unsafe_allow_html=True)
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align:center; color:#888; font-size:0.85rem;">
