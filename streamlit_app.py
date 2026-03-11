@@ -1,6 +1,7 @@
 """
-Resume Chatbot - Groq Edition
-Multiple Groq Models | RAG-powered | No API key input needed
+Resume Chatbot - Groq Edition (Lightweight)
+Using TF-IDF for embeddings (no PyTorch needed)
+Multiple Groq Models | RAG-powered
 """
 
 import streamlit as st
@@ -9,8 +10,8 @@ import numpy as np
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
 
 # =====================================================
 # PAGE CONFIG
@@ -23,7 +24,7 @@ st.set_page_config(
 )
 
 # =====================================================
-# GROQ MODELS CONFIGURATION
+# GROQ MODELS
 # =====================================================
 GROQ_MODELS = {
     "Llama 3.1 8B (Fast)": {
@@ -240,56 +241,57 @@ AWARDS AND RECOGNITION
    Date: June 2023
    Organization: Datamatics
 
-YEARS OF EXPERIENCE: Nearly 7 years total professional experience
-CURRENT ROLE: Associate Consultant - AI/ML at Datamatics
-SPECIALIZATION: AI/ML, NLP, Generative AI, LLM, Document Processing, Invoice Automation
+KEY FACTS:
+- Total Years of Experience: Nearly 7 years
+- Current Role: Associate Consultant - AI/ML at Datamatics (TruAI Division)
+- Location: Pondicherry, India
+- Specialization: AI/ML, NLP, Generative AI, LLM, Document Processing, Invoice Automation
+- Key Achievement: 90% accuracy for Ingram Micro, 93.40% accuracy for BelleTire
+- Processing Speed: 10-11 seconds per page end-to-end
 """
 
 
 # =====================================================
-# RAG IMPLEMENTATION
+# LIGHTWEIGHT RAG (TF-IDF based - No PyTorch!)
 # =====================================================
 
 @dataclass
 class Chunk:
-    """A chunk of text with metadata"""
     text: str
     section: str
     index: int
 
 
-class SimpleRAG:
-    """Simple RAG implementation using sklearn"""
+class LightweightRAG:
+    """RAG using TF-IDF - no heavy dependencies"""
     
     def __init__(self):
         self.chunks: List[Chunk] = []
-        self.embeddings: np.ndarray = None
-        self.model: SentenceTransformer = None
+        self.vectorizer: TfidfVectorizer = None
+        self.tfidf_matrix = None
     
-    def load_model(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-    
-    def split_text(self, text: str, chunk_size: int = 400, overlap: int = 50) -> List[str]:
-        sentences = text.replace('\n\n', '\n').split('\n')
+    def split_text(self, text: str) -> List[str]:
+        """Split text into chunks based on double newlines"""
+        # Split by sections
+        sections = text.split('\n\n')
+        
         chunks = []
         current_chunk = []
         current_length = 0
+        max_chunk_size = 500
         
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
+        for section in sections:
+            section = section.strip()
+            if not section:
                 continue
-                
-            sentence_length = len(sentence)
             
-            if current_length + sentence_length > chunk_size and current_chunk:
+            if current_length + len(section) > max_chunk_size and current_chunk:
                 chunks.append('\n'.join(current_chunk))
-                overlap_text = current_chunk[-2:] if len(current_chunk) >= 2 else current_chunk
-                current_chunk = overlap_text.copy()
-                current_length = sum(len(s) for s in current_chunk)
+                current_chunk = []
+                current_length = 0
             
-            current_chunk.append(sentence)
-            current_length += sentence_length
+            current_chunk.append(section)
+            current_length += len(section)
         
         if current_chunk:
             chunks.append('\n'.join(current_chunk))
@@ -297,57 +299,79 @@ class SimpleRAG:
         return chunks
     
     def identify_section(self, text: str) -> str:
+        """Identify section from text content"""
         text_upper = text.upper()
         
-        if any(kw in text_upper for kw in ['PROFESSIONAL SUMMARY', 'SUMMARY', 'RESULTS-DRIVEN']):
+        if any(kw in text_upper for kw in ['PROFESSIONAL SUMMARY', 'RESULTS-DRIVEN']):
             return "Summary"
-        elif any(kw in text_upper for kw in ['WORK EXPERIENCE', 'POSITION:', 'COMPANY:', 'DURATION:']):
+        elif any(kw in text_upper for kw in ['WORK EXPERIENCE', 'POSITION:', 'COMPANY:', 'DURATION:', 'KEY RESPONSIBILITIES']):
             return "Work Experience"
-        elif any(kw in text_upper for kw in ['TECHNICAL SKILLS', 'PROGRAMMING', 'FRAMEWORKS']):
+        elif any(kw in text_upper for kw in ['TECHNICAL SKILLS', 'PROGRAMMING LANGUAGES', 'FRAMEWORKS']):
             return "Skills"
-        elif any(kw in text_upper for kw in ['EDUCATION', 'DEGREE:', 'INSTITUTION:']):
+        elif any(kw in text_upper for kw in ['EDUCATION', 'DEGREE:', 'B.TECH', 'HSC', 'SSLC']):
             return "Education"
-        elif any(kw in text_upper for kw in ['CERTIFICATION', 'INSTRUCTOR:', 'PLATFORM:']):
+        elif any(kw in text_upper for kw in ['CERTIFICATION', 'UDEMY', 'IBM']):
             return "Certifications"
-        elif any(kw in text_upper for kw in ['AWARD', 'RECOGNITION', 'WINNER']):
+        elif any(kw in text_upper for kw in ['AWARD', 'RECOGNITION', 'WINNER', 'FELICITATION']):
             return "Awards"
-        elif any(kw in text_upper for kw in ['CONTACT', 'EMAIL:', 'PHONE:', 'LINKEDIN']):
+        elif any(kw in text_upper for kw in ['CONTACT', 'EMAIL', 'PHONE', 'LINKEDIN', 'ADDRESS']):
             return "Contact"
+        elif any(kw in text_upper for kw in ['KEY FACTS', 'TOTAL YEARS', 'CURRENT ROLE']):
+            return "Key Facts"
+        elif any(kw in text_upper for kw in ['PROJECT', 'AUTOMATION', 'INGRAM', 'BELLETIRE']):
+            return "Projects"
         else:
             return "General"
     
     def index_document(self, text: str):
+        """Index document using TF-IDF"""
         raw_chunks = self.split_text(text)
         
         self.chunks = []
         for i, chunk_text in enumerate(raw_chunks):
-            section = self.identify_section(chunk_text)
-            self.chunks.append(Chunk(text=chunk_text, section=section, index=i))
+            if chunk_text.strip():
+                section = self.identify_section(chunk_text)
+                self.chunks.append(Chunk(text=chunk_text, section=section, index=i))
         
+        # Create TF-IDF vectors
         chunk_texts = [c.text for c in self.chunks]
-        self.embeddings = self.model.encode(chunk_texts, convert_to_numpy=True, show_progress_bar=False)
+        self.vectorizer = TfidfVectorizer(
+            stop_words='english',
+            ngram_range=(1, 2),
+            max_features=5000
+        )
+        self.tfidf_matrix = self.vectorizer.fit_transform(chunk_texts)
     
     def search(self, query: str, top_k: int = 4) -> List[Tuple[Chunk, float]]:
-        query_embedding = self.model.encode([query], convert_to_numpy=True, show_progress_bar=False)
-        similarities = cosine_similarity(query_embedding, self.embeddings)[0]
+        """Search for relevant chunks"""
+        query_vector = self.vectorizer.transform([query])
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+        
         top_indices = np.argsort(similarities)[::-1][:top_k]
         
         results = []
         for idx in top_indices:
-            results.append((self.chunks[idx], float(similarities[idx])))
+            if similarities[idx] > 0:  # Only include if there's some relevance
+                results.append((self.chunks[idx], float(similarities[idx])))
+        
+        # If no relevant results, return top chunks anyway
+        if not results:
+            for idx in top_indices[:2]:
+                results.append((self.chunks[idx], float(similarities[idx])))
         
         return results
 
 
-@st.cache_resource(show_spinner=True)
-def initialize_rag() -> SimpleRAG:
-    rag = SimpleRAG()
-    rag.load_model()
+@st.cache_resource
+def initialize_rag() -> LightweightRAG:
+    """Initialize and cache the RAG system"""
+    rag = LightweightRAG()
     rag.index_document(RESUME_CONTENT)
     return rag
 
 
-def get_context(rag: SimpleRAG, query: str, top_k: int = 4) -> Tuple[str, List[Dict]]:
+def get_context(rag: LightweightRAG, query: str, top_k: int = 4) -> Tuple[str, List[Dict]]:
+    """Get relevant context for a query"""
     results = rag.search(query, top_k=top_k)
     
     context_parts = []
@@ -356,9 +380,9 @@ def get_context(rag: SimpleRAG, query: str, top_k: int = 4) -> Tuple[str, List[D
     for chunk, score in results:
         context_parts.append(chunk.text)
         sources.append({
-            "content": chunk.text[:250] + "..." if len(chunk.text) > 250 else chunk.text,
+            "content": chunk.text[:300] + "..." if len(chunk.text) > 300 else chunk.text,
             "section": chunk.section,
-            "relevance": f"{score:.0%}"
+            "relevance": f"{score:.0%}" if score > 0 else "Related"
         })
     
     context = "\n\n---\n\n".join(context_parts)
@@ -373,28 +397,25 @@ def get_api_key() -> str:
     """Get API key from Streamlit secrets"""
     try:
         return st.secrets["GROQ_API_KEY"]
-    except KeyError:
+    except:
         return ""
 
 
 def call_groq_api(prompt: str, model_id: str) -> str:
-    """Call Groq API with selected model"""
-    
+    """Call Groq API"""
     api_key = get_api_key()
     
     if not api_key:
         return """❌ **API Key Not Configured**
-        
+
 Please add your Groq API key to Streamlit secrets:
 
-1. Go to your app settings on Streamlit Cloud
-2. Click "Secrets" tab
-3. Add: `GROQ_API_KEY = "your_key_here"`
+1. Go to your app settings on [share.streamlit.io](https://share.streamlit.io)
+2. Click **Settings** → **Secrets**
+3. Add: `GROQ_API_KEY = "gsk_your_key_here"`
 4. Save and reboot the app
 
-Get your free key at [console.groq.com](https://console.groq.com/keys)"""
-    
-    url = "https://api.groq.com/openai/v1/chat/completions"
+🔗 Get your free key at [console.groq.com](https://console.groq.com/keys)"""
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -406,19 +427,23 @@ Get your free key at [console.groq.com](https://console.groq.com/keys)"""
         "messages": [
             {
                 "role": "system",
-                "content": """You are a professional AI assistant representing Vijai Venkatesan, an experienced AI/ML Engineer with nearly 7 years of experience.
+                "content": """You are a professional AI assistant representing Vijai Venkatesan, an experienced AI/ML Engineer with nearly 7 years of experience at Datamatics.
 
-Your role is to:
-- Answer questions about his professional background, skills, experience, and achievements
-- Be helpful, professional, accurate, and friendly
-- Use specific details from the provided context
-- If information is not available, politely say so
-- Highlight relevant achievements with specific numbers when available
+Your role:
+- Answer questions about his professional background, skills, and achievements
+- Be helpful, professional, and friendly
+- Use specific details and numbers from the context
+- If information isn't available, say so politely
+- Keep responses concise but informative
 
-Keep responses concise but informative."""
+Key facts to remember:
+- Nearly 7 years of experience
+- Current role: Associate Consultant - AI/ML at Datamatics
+- Key achievement: 90% accuracy (Ingram Micro), 93.40% accuracy (BelleTire)
+- Specializes in: AI/ML, NLP, Generative AI, LLM, Document Processing"""
             },
             {
-                "role": "user", 
+                "role": "user",
                 "content": prompt
             }
         ],
@@ -427,46 +452,45 @@ Keep responses concise but informative."""
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
         
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         elif response.status_code == 401:
-            return "❌ **Invalid API Key.** Please check your Groq API key in Streamlit secrets."
+            return "❌ **Invalid API Key.** Please check your Groq API key."
         elif response.status_code == 429:
-            return "⚠️ **Rate limit exceeded.** Please wait a moment and try again."
-        elif response.status_code == 503:
-            return "⚠️ **Service temporarily unavailable.** Please try again in a few seconds."
+            return "⚠️ **Rate limit.** Please wait a moment and try again."
         else:
-            error_detail = response.json().get("error", {}).get("message", "Unknown error")
-            return f"❌ **API Error ({response.status_code}):** {error_detail}"
+            return f"❌ **Error ({response.status_code}):** {response.text[:200]}"
     
     except requests.exceptions.Timeout:
-        return "⏱️ **Request timed out.** Please try again."
-    except requests.exceptions.ConnectionError:
-        return "🔌 **Connection error.** Please check your internet connection."
+        return "⏱️ **Timeout.** Please try again."
     except Exception as e:
         return f"❌ **Error:** {str(e)}"
 
 
 def generate_answer(question: str, context: str, model_id: str) -> str:
-    """Generate answer using Groq"""
-    
-    prompt = f"""Based on the following resume information about Vijai Venkatesan, please answer the question.
-Use specific details from the context. Be professional and helpful.
+    """Generate answer"""
+    prompt = f"""Based on the following resume information about Vijai Venkatesan, answer the question.
+Use specific details from the context.
 
-CONTEXT FROM RESUME:
+CONTEXT:
 {context}
 
 QUESTION: {question}
 
-Please provide a clear, informative answer:"""
+ANSWER:"""
     
     return call_groq_api(prompt, model_id)
 
 
 # =====================================================
-# CUSTOM CSS
+# CSS
 # =====================================================
 
 st.markdown("""
@@ -479,7 +503,6 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         text-align: center;
         padding: 0.5rem 0;
-        margin-bottom: 0;
     }
     
     .sub-header {
@@ -498,24 +521,12 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
     }
     
-    .profile-card h3 {
-        margin: 0 0 0.5rem 0;
-        font-size: 1.2rem;
-    }
-    
-    .profile-card p {
-        margin: 0.25rem 0;
-        font-size: 0.85rem;
-        opacity: 0.95;
-    }
-    
-    .profile-card a {
-        color: white !important;
-        text-decoration: underline;
-    }
+    .profile-card h3 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
+    .profile-card p { margin: 0.25rem 0; font-size: 0.85rem; opacity: 0.95; }
+    .profile-card a { color: white !important; text-decoration: underline; }
     
     .model-info {
-        background: #e8f4fd;
+        background: #e3f2fd;
         border-radius: 0.5rem;
         padding: 0.5rem 0.75rem;
         font-size: 0.8rem;
@@ -532,17 +543,8 @@ st.markdown("""
         font-size: 0.85rem;
     }
     
-    .source-header {
-        color: #1E88E5;
-        font-weight: 600;
-        font-size: 0.9rem;
-        margin-bottom: 0.25rem;
-    }
-    
-    .source-content {
-        color: #444;
-        line-height: 1.4;
-    }
+    .source-header { color: #1E88E5; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; }
+    .source-content { color: #444; line-height: 1.4; }
     
     .welcome-card {
         background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf0 100%);
@@ -556,9 +558,9 @@ st.markdown("""
     .powered-by {
         background: linear-gradient(90deg, #f97316 0%, #ea580c 100%);
         color: white;
-        padding: 0.5rem 1rem;
+        padding: 0.4rem 0.8rem;
         border-radius: 2rem;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         font-weight: 600;
         display: inline-block;
         margin-top: 0.5rem;
@@ -591,7 +593,7 @@ if "selected_model" not in st.session_state:
 # =====================================================
 
 with st.sidebar:
-    # Profile Card
+    # Profile
     st.markdown("""
     <div class="profile-card">
         <h3>👤 Vijai Venkatesan</h3>
@@ -599,16 +601,15 @@ with st.sidebar:
         <p>🏢 Datamatics (TruAI Division)</p>
         <p>📍 Pondicherry, India</p>
         <p>📧 vijaibt1@gmail.com</p>
-        <p>🔗 <a href="https://linkedin.com/in/vijai-v-2b89841a3" target="_blank">LinkedIn Profile</a></p>
+        <p>🔗 <a href="https://linkedin.com/in/vijai-v-2b89841a3" target="_blank">LinkedIn</a></p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Quick Stats
+    # Stats
     st.markdown("### 📊 Quick Stats")
     c1, c2 = st.columns(2)
     c1.metric("Experience", "~7 Years")
     c2.metric("Projects", "12+")
-    
     c3, c4 = st.columns(2)
     c3.metric("Certs", "9+")
     c4.metric("Awards", "4")
@@ -623,24 +624,17 @@ with st.sidebar:
         options=list(GROQ_MODELS.keys()),
         index=list(GROQ_MODELS.keys()).index(st.session_state.selected_model),
         format_func=lambda x: f"{GROQ_MODELS[x]['icon']} {x}",
-        help="Different models have different capabilities"
+        label_visibility="collapsed"
     )
-    
     st.session_state.selected_model = selected_model
     
-    # Show model description
     model_info = GROQ_MODELS[selected_model]
-    st.markdown(f"""
-    <div class="model-info">
-        ℹ️ {model_info['description']}
-    </div>
-    """, unsafe_allow_html=True)
-    
+    st.markdown(f'<div class="model-info">ℹ️ {model_info["description"]}</div>', unsafe_allow_html=True)
     st.markdown('<div class="powered-by">⚡ Powered by Groq</div>', unsafe_allow_html=True)
     
     st.divider()
     
-    # Suggested Questions
+    # Quick Questions
     st.markdown("### 💡 Quick Questions")
     
     questions = [
@@ -660,47 +654,38 @@ with st.sidebar:
     
     st.divider()
     
-    # Clear Chat
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
     
-    # Footer
     st.markdown("""
-    <div style="text-align:center; font-size:0.75rem; color:#888; margin-top:1rem;">
-        Built with ❤️<br>
-        RAG + Groq + Streamlit
+    <div style="text-align:center; font-size:0.7rem; color:#888; margin-top:1rem;">
+        Built with ❤️ using RAG + Groq
     </div>
     """, unsafe_allow_html=True)
 
 
 # =====================================================
-# MAIN CONTENT
+# MAIN
 # =====================================================
 
-# Header
 st.markdown('<h1 class="main-header">🤖 AI Resume Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Ask me anything about Vijai Venkatesan\'s professional background</p>', unsafe_allow_html=True)
 
-# Initialize RAG
-with st.spinner("🔄 Loading AI..."):
-    rag = initialize_rag()
+# Initialize RAG (very fast now!)
+rag = initialize_rag()
 
-# Get current model
 current_model_id = GROQ_MODELS[st.session_state.selected_model]["id"]
 
-# Display chat history
+# Chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        
-        # Show model used for assistant messages
         if msg["role"] == "assistant":
             if msg.get("model"):
-                st.caption(f"🤖 Model: {msg['model']}")
-            
+                st.caption(f"🤖 {msg['model']}")
             if msg.get("sources"):
-                with st.expander("📚 View Sources"):
+                with st.expander("📚 Sources"):
                     for src in msg["sources"]:
                         st.markdown(f"""
                         <div class="source-card">
@@ -709,16 +694,15 @@ for msg in st.session_state.messages:
                         </div>
                         """, unsafe_allow_html=True)
 
-# Handle sidebar question click
+# Handle quick question
 if "pending_question" in st.session_state:
     question = st.session_state.pending_question
     del st.session_state.pending_question
     
     st.session_state.messages.append({"role": "user", "content": question})
-    
     context, sources = get_context(rag, question)
     
-    with st.spinner(f"🤔 Thinking with {st.session_state.selected_model}..."):
+    with st.spinner(f"🤔 {st.session_state.selected_model}..."):
         answer = generate_answer(question, context, current_model_id)
     
     st.session_state.messages.append({
@@ -731,24 +715,22 @@ if "pending_question" in st.session_state:
 
 # Chat input
 if prompt := st.chat_input("Ask about experience, skills, projects..."):
-    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     with st.chat_message("user"):
         st.markdown(prompt)
     
-    # Get context and generate response
     context, sources = get_context(rag, prompt)
     
     with st.chat_message("assistant"):
-        with st.spinner(f"🤔 Thinking with {st.session_state.selected_model}..."):
+        with st.spinner(f"🤔 {st.session_state.selected_model}..."):
             answer = generate_answer(prompt, context, current_model_id)
         
         st.markdown(answer)
-        st.caption(f"🤖 Model: {st.session_state.selected_model}")
+        st.caption(f"🤖 {st.session_state.selected_model}")
         
         if sources:
-            with st.expander("📚 View Sources"):
+            with st.expander("📚 Sources"):
                 for src in sources:
                     st.markdown(f"""
                     <div class="source-card">
@@ -757,7 +739,6 @@ if prompt := st.chat_input("Ask about experience, skills, projects..."):
                     </div>
                     """, unsafe_allow_html=True)
     
-    # Save to history
     st.session_state.messages.append({
         "role": "assistant",
         "content": answer,
@@ -765,18 +746,17 @@ if prompt := st.chat_input("Ask about experience, skills, projects..."):
         "model": st.session_state.selected_model
     })
 
-# Welcome message
+# Welcome
 if not st.session_state.messages:
     st.markdown(f"""
     <div class="welcome-card">
         <h3>👋 Welcome!</h3>
         <p>I'm an AI assistant powered by <strong>{st.session_state.selected_model}</strong></p>
-        <p>Ask me anything about <strong>Vijai Venkatesan's</strong> professional background.</p>
+        <p>Ask me about <strong>Vijai Venkatesan's</strong> professional background.</p>
         <br>
-        <p><strong>Try asking about:</strong></p>
         <p>🎯 Experience &nbsp;|&nbsp; 💻 Skills &nbsp;|&nbsp; 🏆 Projects &nbsp;|&nbsp; 📜 Certifications &nbsp;|&nbsp; 🥇 Awards</p>
         <br>
-        <p><em>👈 Select a different AI model in the sidebar, or click a quick question!</em></p>
+        <p><em>👈 Click a quick question or type your own below!</em></p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -785,7 +765,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align:center; color:#888; font-size:0.85rem;">
     💼 <a href="https://linkedin.com/in/vijai-v-2b89841a3" target="_blank">LinkedIn</a> &nbsp;|&nbsp;
-    📧 <a href="mailto:vijaibt1@gmail.com">Email</a> &nbsp;|&nbsp;
-    Built with RAG + Groq + Streamlit
+    📧 <a href="mailto:vijaibt1@gmail.com">Email</a>
 </div>
 """, unsafe_allow_html=True)
